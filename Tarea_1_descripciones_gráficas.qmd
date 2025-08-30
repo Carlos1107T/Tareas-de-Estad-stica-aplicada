@@ -1,0 +1,570 @@
+---
+title: "Estadística Descriptiva. Gráficas Variables Cuantitativas."
+Autor: Carlos Antonio Reyes Gutiérrez
+Profesor: Carlos Yebra
+format: 
+  html:
+    grid: 
+      body-width: 950px
+editor: visual
+lang: es
+---
+
+
+
+#Titulo: "Intersecciones entre Educación, Migración y Mercado Laboral: Un Análisis de la Población Económicamente Activa en Michoacán"
+
+**Problema Central: Se desconoce cómo se interrelacionan y afectan mutuamente los niveles educativos, la condición de actividad económica y los fenómenos migratorios (tanto interestatales como internacionales) en la población michoacana. Comprender estas dinámicas es crucial para diseñar políticas públicas efectivas en educación, desarrollo económico y apoyo a migrantes.**
+
+###Hipotesis: A mayor grado promedio de escolaridad en un municipio, se observará una mayor tasa de participación en la población económicamente activa (PEA) local y una menor tasa de migración internacional hacia Estados Unidos, incluso después de controlar por factores demográficos y geográficos."
+
+#¿Cómo influye el nivel educativo de la población de un municipio en su estructura económica y migratoria, específicamente en la probabilidad de participar en el mercado laboral local y en la decisión de migrar internacionalmente?
+
+```{r}
+#| code-fold: true
+#| warning: false
+#| message: false
+
+library(tidyverse)
+library(sf)          # Para datos espaciales
+library(viridis)     # Para paletas de colores
+library(janitor)    # Para limpiar nombres de columnas
+library(scales)     # Para mejorar ejes en gráficos
+
+```
+
+# Datos espaciales de Michoacán
+
+```{r municipios}
+#| code-fold: true
+#| fig-width: 7
+#| fig-align: center
+
+#municipios_Michoacán <- st_read("1_estadistica_descriptiva/data/14mun.shp", options = "ENCODING=LATIN1", quiet = TRUE)
+municipios_Michoacán <- st_read("data/16mun.shp", options = "ENCODING=LATIN1", quiet = TRUE)
+
+# Crear mapa de municipios de Michoacán
+mapa_municipios <- ggplot(municipios_Michoacán) +
+  geom_sf(fill = "lightgreen", color = "white", size = 0.3) +
+  labs(
+    title = "Municipios de Michoacán",
+    subtitle = paste("Total de municipios:", nrow(municipios_Michoacán)),
+    caption = "Fuente: INEGI - Marco Geoestadístico"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12),
+    plot.caption = element_text(size = 10)
+  )
+
+print(mapa_municipios)
+```
+
+# Fuente de datos: INEGI
+
+Para este ejemplo, utilizaremos los datos del **Instituto Nacional de Estadística y Geografía (INEGI)** de México. Específicamente, los Censos y Conteos de Población y Vivienda disponible en:
+
+**Enlace de descarga**: https://inegi.org.mx/app/descarga/
+
+Buscar: Estado. Seleccionar: Programas \> Censos y Conteos de Población y Vivienda \> 2020 \> Indicadores 1900-2020 y descargar el archivo CSV.
+
+Extraer el archivo `cpv_valor_14.csv` y guardarlo en la carpeta `data/`.
+
+# Lectura de datos
+
+Carguemos los datos de población y vivienda para el año 2020, filtrando por algunos indicadores relevantes:
+
+-   Edad mediana
+-   Población total
+-   Porcentaje de la población derechohabiente en el IMSS
+-   Porcentaje de viviendas con electricidad
+-   Porcentaje de viviendas particulares habitadas que disponen de Internet
+
+```{r}
+#| code-fold: true
+#| warning: false
+#| message: false
+
+
+#datos_total <- read_csv("1_estadistica_descriptiva/data/cpv_valor_16.csv", na = c("ND"))
+datos_total <- read_csv("data/cpv_valor_16.csv", na = c("ND"))
+
+datos_total <- datos_total |> filter(año == 2020)
+#unique(datos_total$indicador)
+datos_seleccion <- datos_total |> 
+  filter(indicador %in% c("Edad mediana", "Población total", "Porcentaje de la población derechohabiente en el IMSS", "Porcentaje de viviendas con electricidad", "Grado promedio de escolaridad de la población de 15 y más años","Porcentaje de la población de 15 años y más con instrucción media superior","Porcentaje de la población de 15 años y más con instrucción superior","Porcentaje de la población de 15 años y más sin instrucción","Porcentaje de población de 15 años y más sin escolaridad","Porcentaje de la población de 3 años y más que asiste a la escuela","Porcentaje de población inmigrante (migración reciente)","Población de 5 años y más inmigrante", "Porcentaje de la población migrante internacional destino otro país", "Porcentaje de la población migrante internacional destino Estados Unidos de América","Población de 5 años y más emigrante","Porcentaje de población de 12 años y más económicamente activa","Porcentaje de la población de 12 años y más No Económicamente Activa", "Porcentaje de la población de 12 años y más económicamente activa ocupada","Porcentaje de la población femenina de 12 años y más económicamente activa","Porcentaje de la población masculina de 12 años y más económicamente activa", "Porcentaje de viviendas particulares habitadas que disponen de Internet","Porcentaje de la población de 12 años y más no económicamente activa que se dedica a los quehaceres del hogar",  "Población derechohabiente a servicios de salud", "Densidad de población", "Porcentaje de la población de 5 y más años migrante según causa: Inseguridad delictiva o violencia", "Porcentaje de la población de 5 y más años migrante según causa: Otra causa" ), desc_municipio != "Estatal") |> 
+  select(desc_municipio, indicador, valor)
+```
+
+Cambiamos el formato de los datos para que cada indicador sea una columna separada, facilitando el análisis posterior. Además, limpiamos los nombres de las columnas para que sean más manejables y creamos una columna `NOMGEO` para poder unir los datos espaciales con los datos de población y vivienda.
+
+```{r}
+#| code-fold: true
+#| warning: false
+#| message: false
+
+datos <- datos_seleccion |>
+    pivot_wider(names_from = indicador, values_from = valor) 
+
+datos <- datos |> 
+  clean_names() 
+
+# Corrección de nombres de municipios
+
+datos <- datos |> 
+  mutate(desc_municipio = if_else(desc_municipio == "EL Arenal", "El Arenal", desc_municipio))
+
+datos <- datos |> 
+  mutate(NOMGEO = desc_municipio)
+```
+
+# Estadísticas descriptivas
+
+Ahora que tenemos nuestros datos preparados, podemos realizar un resumen numérico de las variables cuantitativas. Para ello, utilizaremos la función `summary()` de R, que nos proporcionará un resumen estadístico de cada variable, incluyendo la media, mediana, mínimo, máximo y cuartiles. Hay que agregar las demás medidas de dispersión analizadas en clase (desviación media, varianza, rango, etc.) para cada variable cuantitativa.
+
+```{r}
+#| code-fold: true
+
+summary(datos)
+```
+
+Se unen los datos geograficos de los municipios de Michoacán con los datos de población y vivienda. Esto nos permitirá crear mapas y realizar análisis espaciales. Para preservar la integridad de los datos, utilizamos `left_join()` de `dplyr`, el primer conjunto de datos debe ser el que contenga la columna `geometry`.
+
+```{r}
+#| code-fold: true
+
+datos <- left_join(municipios_Michoacán, datos)
+```
+
+# Escolaridad (Mediana)
+
+```{r}
+#| code-fold: true
+#| fig-width: 8
+#| fig-align: center
+
+
+ggplot(datos) +
+  geom_sf(aes(fill = grado_promedio_de_escolaridad_de_la_poblacion_de_15_y_mas_anos), color = "white", size = 0.1) +
+  scale_fill_viridis_c(
+    name = "Grado promedio "
+  ) +
+  labs(
+    title = "Promedio de escolaridad de la población de 15 y mas años",
+    caption = "Fuente: INEGI - Marco Geoestadístico"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12),
+    plot.caption = element_text(size = 10),
+    legend.position = "right"
+  )
+
+```
+
+```{r}
+#| code-fold: true
+#| fig-width: 8
+#| fig-align: center
+
+
+ggplot(datos) +
+  geom_sf(aes(fill =  porcentaje_de_poblacion_de_12_anos_y_mas_economicamente_activa), color = "white", size = 0.1) +
+scale_fill_distiller(
+  palette = "Spectral",
+  direction = 1,  
+  name = "Porcentaje de PEA"
+) +
+  labs(
+    title = "Porcentaje de población Económicamente Activa",
+    caption = "Fuente: INEGI - Marco Geoestadístico"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12),
+    plot.caption = element_text(size = 10),
+    legend.position = "right"
+  )
+
+```
+
+```{r}
+#| code-fold: true
+#| fig-width: 8
+#| fig-align: center
+
+
+ggplot(datos) +
+  geom_sf(aes(fill = porcentaje_de_la_poblacion_de_5_y_mas_anos_migrante_segun_causa_otra_causa), color = "white", size = 0.1) +
+  scale_fill_distiller(
+  palette = "Spectral",
+  direction = 1,  
+  name = "Porcentaje "
+) +  labs(
+    title = "Porcentaje de población migrante segun otra causa",
+    caption = "Fuente: INEGI - Marco Geoestadístico"
+  )+
+  theme_void() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12),
+    plot.caption = element_text(size = 10),
+    legend.position = "right"
+  )
+
+```
+
+# 
+
+```{r}
+#| code-fold: true
+#| fig-width: 8
+#| fig-align: center
+
+
+ggplot(datos) +
+  geom_sf(aes(fill = poblacion_de_5_anos_y_mas_emigrante), color = "white", size = 0.1) +
+  scale_fill_distiller(
+  palette = "Spectral",
+  direction = 1,  
+  name = "personas "
+) +  labs(
+    title = "Población de 5 años y mas emigrante",
+    caption = "Fuente: INEGI - Marco Geoestadístico"
+  )+
+  theme_void() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12),
+    plot.caption = element_text(size = 10),
+    legend.position = "right"
+  )
+
+```
+
+```{r}
+library(readxl)
+Migracion_01 <- read_excel("./Migracion_01.xlsx")
+View(Migracion_01)
+```
+
+#Los datos anteriores los saque de https://www.inegi.org.mx/app/tabulados/interactivos/?pxq=Migracion_Migracion_01_426da5e7-766a-42a9-baef-5768cde4fca9 y https://www.inegi.org.mx/app/tabulados/interactivos/?pxq=Poblacion_Poblacion_01_e60cd8cf-927f-4b94-823e-972457a12d4b
+
+```{r}
+
+Migracion_01$porcentaje_emigracion <- (Migracion_01$Total_emigración/ Migracion_01$Total_población) * 100
+Migracion_01$porcentaje_emigracion
+```
+
+**Observando las medianas y en general los mapas de estas 3 variables podemos observar que el 20% de la población de Michoacán emigra a Estados Unidos de America principalmente y las causas no necesariamente es la inseguridad ya que para la variable porcentaje de la poblacion de 5 y mas anos migrante segun causa inseguridad delictiva o violencia el promedio es de 2.9% lo que nos quiere decir que probablemente este 20% quiera que sus hijos o ellos mismos encontrar otra calidad de vida donde sus hijos puedan estudiar y no trabajar en el campo**
+
+A continuación, se presentan diferentes tipos de gráficos para visualizar la distribución de una sola variable cuantitativa, en este caso, la edad mediana de los municipios de Michoacán. Estos gráficos son útiles para comprender la distribución y características de la variable. En cada caso, es necesario que incluyas cómo se lleva a cabo cada gráfico y posteriormente, la interpretación de los resultados.
+
+## Histograma
+
+```{r}
+#| code-fold: true
+#| fig-width: 7
+#| fig-align: center
+
+ggplot(datos) +
+  geom_histogram(aes(edad_mediana), color="black", fill = "olivedrab", boundary=min(datos$edad_mediana), binwidth = 2) +
+  labs(
+    title = "Distribución de la Edad",
+    x = "Edad (años)", y = "Frecuencia"
+  ) +
+  theme_bw()+
+  theme(
+    legend.title = element_text(size=13, face="bold"),
+    legend.text = element_text(size=13),
+    plot.title = element_text(size=15, face="bold"),
+    plot.subtitle = element_text(size=13),
+    axis.text.x=element_text(size=12),
+    axis.text.y=element_text(size=12),
+    axis.title.x = element_text(face="bold", size=13),
+    axis.title.y = element_text(face="bold", size=13)
+  )
+
+```
+
+**En esta grafica podemos observar que la población se concentra entre los 25 a 30 años la edad donde las personas tienen más capacidad para trabajar y tambien se observa que hay pocos jovenes y personas mayores a 35, quizas sean las personas que emigran solamente a EUA para que sus hijos crezcan y luego tienden a regresar o ya no regresan a este estado**
+
+## Gráfica de densidad
+
+```{r}
+#| code-fold: true
+#| fig-width: 7
+#| fig-align: center
+
+ggplot(datos) +
+  geom_density(aes(porcentaje_de_la_poblacion_de_12_anos_y_mas_economicamente_activa_ocupada), color="black", fill = "firebrick", alpha=0.6) +
+  labs(
+    title = "Distribución de la Población Económicamente Activa OCUPADA",
+    x = "Porcentaje de PEA ocupada", y = "Densidad"
+  ) +
+  theme_bw()+
+  theme(
+    legend.title = element_text(size=13, face="bold"),
+    legend.text = element_text(size=13),
+    plot.title = element_text(size=15, face="bold"),
+    plot.subtitle = element_text(size=13),
+    axis.text.x=element_text(size=12),
+    axis.text.y=element_text(size=12),
+    axis.title.x = element_text(face="bold", size=13),
+    axis.title.y = element_text(face="bold", size=13)
+  )
+
+
+```
+
+**En esta gráfica de densidad podemos observar que el 99% de la población esta ocupada y va muy de acuerdo con las personas que viven ahí de acuerdo a la edad ademas comparando a la mediana del mapa donde esta solo la Población Economicamente Activa, se puede observar que hay un gran cambio ya que en la otra el promedio era de 58.09%, entonces esto nos puede decir que hay un gran porcentaje de personas que estan en la informalidad por eso hay un gran salto**
+
+## Boxplot
+
+```{r}
+#| code-fold: true
+#| fig-width: 7
+#| fig-align: center
+
+ggplot(data = datos, aes(x = "", y = grado_promedio_de_escolaridad_de_la_poblacion_de_15_y_mas_anos )) +
+    geom_boxplot(
+    fill = "#4A90E2",           # Color de relleno
+    color = "#2C5F7A",          # Color del borde más oscuro
+    alpha = 0.8,                # Transparencia
+    outlier.color = "#E74C3C",  # Color rojo para outliers
+    outlier.size = 2.5,         # Tamaño de outliers
+    outlier.alpha = 0.7,        # Transparencia de outliers
+    width = 0.5,                # Ancho del boxplot
+    notch = TRUE,               # Muescas para intervalo de confianza
+    notchwidth = 0.7            # Ancho de las muescas
+  ) +
+  geom_jitter(alpha = 0.3, color = "#34495E", size = 1.5, width = 0.1) +
+  scale_y_continuous(breaks = pretty_breaks(n = 8), labels = function(x) paste(x, "Años aprobados")) +
+  labs(title = "Distribución de la escolaridad (mediana)", 
+  subtitle = "Población del Estado de Michoacán",
+  y = "Escolaridad (promedio)",
+  x = "")+
+  theme_bw()+
+  theme(
+    legend.title = element_text(size=13, face="bold"),
+    legend.text = element_text(size=13),
+    plot.title = element_text(size=15, face="bold"),
+    plot.subtitle = element_text(size=13),
+    axis.text.x=element_text(size=12),
+    axis.text.y=element_text(size=12),
+    axis.title.x = element_text(face="bold", size=13),
+    axis.title.y = element_text(face="bold", size=13),
+    panel.grid.major.y = element_line(color = "#ECF0F1", linewidth = 0.5,
+      linetype = "dashed"),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.background = element_rect(fill = "#FAFAFA", color = NA),
+    plot.background = element_rect(fill = "white", color = NA)
+  )
+```
+
+#Valor Significado equivalente 0 Ningún año de escuela aprobado 6 Primaria terminada 9 Secundaria terminada 12 Preparatoria/Bachillerato terminado 15 Licenciatura terminada \>15 Posgrado
+
+## Gráfico de violín
+
+```{r}
+#| code-fold: true
+#| fig-width: 7
+#| fig-align: center
+
+ggplot(data = datos, aes(x = "", y = densidad_de_poblacion)) +
+    geom_violin(fill = "#4A90E2", color = "#2C5F7A", alpha = 0.8,
+    trim = FALSE,               # No recortar las colas
+    scale = "width", width = 0.8, linewidth = 0.8) +
+    geom_boxplot( width = 0.15, fill = "white", color = "#2C5F7A", alpha = 0.9,
+    outlier.color = "#E74C3C", outlier.size = 1.5, outlier.alpha = 0.8, notch = FALSE) +
+  stat_summary(fun = median, geom = "point", shape = 21, size = 3, fill = "white",
+  color = "#2C5F7A", stroke = 1.5) +
+  geom_jitter(alpha = 0.2, color = "#34495E", size = 0.8, width = 0.05) +
+  scale_y_continuous(breaks = pretty_breaks(n = 8), labels = function(x) paste(x, "km^2")) +
+  labs(title = "Densidad de población", 
+  subtitle = "Población del Estado de Michoacán",
+  y = "Habitantes por km**2",
+  x = "")+
+  theme_bw()+
+  theme(
+    legend.title = element_text(size=13, face="bold"),
+    legend.text = element_text(size=13),
+    plot.title = element_text(size=15, face="bold"),
+    plot.subtitle = element_text(size=13),
+    axis.text.x=element_text(size=12),
+    axis.text.y=element_text(size=12),
+    axis.title.x = element_text(face="bold", size=13),
+    axis.title.y = element_text(face="bold", size=13),
+    panel.grid.major.y = element_line(color = "#ECF0F1", linewidth = 0.5,
+      linetype = "dashed"),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.background = element_rect(fill = "#FAFAFA", color = NA),
+    plot.background = element_rect(fill = "white", color = NA)
+  )
+  
+```
+
+**La forma ancha en la parte inferior (cerca de 0 km²) indica que la mayoría de los municipios tienen densidades poblacionales muy bajas (menos de 100-200 hab/km²).Esto corresponde a municipios rurales y poco poblados, que son la mayoría en Michoacán.El "cuello" del violín que se estrecha y se extiende hacia arriba (hasta 800 km²) revela que: Hay pocos municipios con densidades medias y altas ,Existe una gran desigualdad en la distribución poblacional** \## Q-Q Plot (comparación de cuantiles)
+
+```{r}
+#| code-fold: true
+#| fig-width: 7
+#| fig-align: center
+
+# Q-Q Plot para normalidad del Grado Promedio de Escolaridad
+ggplot(data = datos, aes(sample = grado_promedio_de_escolaridad_de_la_poblacion_de_15_y_mas_anos)) +
+    stat_qq(color = "#4A90E2", size = 2, alpha = 0.7) +
+    stat_qq_line(color = "#E74C3C", linewidth = 1, linetype = "dashed") +
+    scale_x_continuous(
+        name = "Cuantiles Teóricos (Distribución Normal)",
+        breaks = pretty_breaks(n = 6)
+    ) +
+    scale_y_continuous(
+        name = "Cuantiles Muestrales (Escolaridad promedio)",
+        breaks = pretty_breaks(n = 6),
+        labels = function(x) paste(x, "años")
+    ) +
+    labs(
+        title = "Gráfico Q-Q para Normalidad",
+        subtitle = "Grado Promedio de Escolaridad - Municipios de Michoacán",
+        caption = "Fuente: INEGI - Censo de Población y Vivienda"
+    ) +
+    theme_bw() +
+    theme(
+        plot.title = element_text(size = 15, face = "bold", hjust = 0.5),
+        plot.subtitle = element_text(size = 13, hjust = 0.5),
+        plot.caption = element_text(size = 10, hjust = 1),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12),
+        axis.title.x = element_text(face = "bold", size = 13, hjust = 0.5),
+        axis.title.y = element_text(face = "bold", size = 13, hjust = 0.5),
+        panel.grid.major.y = element_line(
+            color = "#ECF0F1", 
+            linewidth = 0.5,
+            linetype = "dashed"
+        ),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.background = element_rect(fill = "#FAFAFA", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        # Elementos removidos porque no son necesarios en Q-Q plot:
+        legend.title = element_blank(),
+        legend.text = element_blank(),
+        legend.position = "none"
+    )
+```
+
+Interpretación del Q-Q Plot de Escolaridad en Michoacán:El gráfico Q-Q revela una clara desviación de la normalidad en la distribución del grado promedio de escolaridad entre los municipios de Michoacán. Los puntos forman una curva en forma de "S" alargada, donde las colas se alejan sistemáticamente de la línea teórica de normalidad. En la **cola inferior** (izquierda), los puntos se ubican por debajo de la línea, indicando la presencia de **municipios con escolaridad extremadamente baja** (valores entre 6-7 años), más de los que se esperarían en una distribución normal. Simultáneamente, en la **cola superior** (derecha), los puntos se desvían por arriba de la línea, mostrando **municipios con escolaridad moderadamente alta** (9-10 años) que superan las expectativas de normalidad. Este patrón confirma visualmente la **desigualdad educativa estructural** en el estado, donde coexisten municipios con graves rezagos educativos y otros con niveles modestos pero significativamente mejores, reflejando la heterogeneidad en el desarrollo social y acceso a oportunidades educativas en la entidad.
+
+## Dot Plot (Gráfico de puntos)
+
+```{r}
+#| code-fold: true
+#| fig-width: 10
+#| fig-height: 16
+#| fig-align: center
+
+ggplot(data = datos, aes(x = grado_promedio_de_escolaridad_de_la_poblacion_de_15_y_mas_anos, 
+                         y = reorder(NOMGEO, grado_promedio_de_escolaridad_de_la_poblacion_de_15_y_mas_anos))) +
+  geom_point(color = "#2166ac", size = 2.5, alpha = 0.8) +
+  geom_segment(aes(x = 0, 
+                   xend = grado_promedio_de_escolaridad_de_la_poblacion_de_15_y_mas_anos, 
+                   y = NOMGEO, 
+                   yend = NOMGEO),
+               color = "#BDC3C7", size = 0.3, alpha = 0.6) +
+  scale_x_continuous(
+    name = "Años de escolaridad promedio",
+    breaks = seq(0, 12, by = 2),
+    limits = c(0, 12),
+    labels = function(x) paste(x, "años"),
+    expand = expansion(mult = c(0, 0.05))
+  ) +
+  scale_y_discrete(
+    name = "Municipios de Michoacán (ordenados por escolaridad)"
+  ) +
+  labs(
+    title = "Grado Promedio de Escolaridad por Municipio",
+    subtitle = "Ordenados de menor a mayor educación | Estado de Michoacán",
+    caption = "Fuente: INEGI - Censo de Población y Vivienda"
+  ) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    plot.caption = element_text(size = 10, hjust = 1),
+    axis.text.x = element_text(size = 11),
+    axis.text.y = element_text(size = 7),  # Tamaño reducido para nombres municipios
+    axis.title.x = element_text(face = "bold", size = 12, hjust = 0.5),
+    axis.title.y = element_text(face = "bold", size = 12, hjust = 0.5),
+    panel.grid.major.x = element_line(color = "#ECF0F1", linewidth = 0.3, linetype = "dashed"),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    panel.background = element_rect(fill = "#FAFAFA", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+   
+  )
+
+
+```
+
+El gráfico revela una **desigualdad educativa moderada pero significativa** entre los municipios de Michoacán, con un rango de **6 a 10.3 años** de escolaridad promedio. Los municipios en la **parte superior** del gráfico (con 6-7 años de escolaridad) se encuentran en situación de **vulnerabilidad educativa**, con una formación que no alcanza a completar la educación secundaria (9 años), lo que limita sustancialmente sus oportunidades de desarrollo y acceso al mercado laboral formal. En el extremo opuesto, los municipios en la **parte inferior** (como Morelia, Uruapan y Lázaro Cárdenas) muestran los **mayores niveles educativos** (9.5-10.3 años), equivalentes a educación media superior incompleta. La **brecha de 4.3 años** entre los municipios extremos evidencia una **disparidad territorial importante**, donde los centros urbanos principales concentran las mejores oportunidades educativas, mientras los municipios periféricos y rurales, aunque no en crisis extrema, carecen de los recursos educativos para alcanzar los umbrales mínimos de competitividad en educación media superior y superior.
+
+#poblacion_de_5_anos_y_mas_emigrante
+
+```{r}
+#| code-fold: true
+#| fig-width: 10
+#| fig-height: 16
+#| fig-align: center
+
+ggplot(data = datos, aes(x = poblacion_de_5_anos_y_mas_emigrante, 
+                         y = reorder(NOMGEO, poblacion_de_5_anos_y_mas_emigrante))) +
+  geom_point(color = "#8b0000", size = 2.5, alpha = 0.8) +
+  geom_segment(aes(x = 0, 
+                   xend = poblacion_de_5_anos_y_mas_emigrante, 
+                   y = NOMGEO, 
+                   yend = NOMGEO),
+               color = "#BDC3C7", size = 0.3, alpha = 0.6) +
+  scale_x_continuous(
+    name = "Población emigrante (número absoluto)",
+    breaks = pretty_breaks(n = 8),
+    labels = function(x) format(x, big.mark = ","),
+    expand = expansion(mult = c(0, 0.05))
+  ) +
+  scale_y_discrete(
+    name = "Municipios de Michoacán (ordenados por número de emigrantes)"
+  ) +
+  labs(
+    title = "Población Emigrante por Municipio",
+    subtitle = "Ordenados de menor a mayor número de emigrantes | Estado de Michoacán",
+    caption = "Fuente: INEGI - Censo de Población y Vivienda"
+  ) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    plot.caption = element_text(size = 10, hjust = 1),
+    axis.text.x = element_text(size = 11),
+    axis.text.y = element_text(size = 7),
+    axis.title.x = element_text(face = "bold", size = 12, hjust = 0.5),
+    axis.title.y = element_text(face = "bold", size = 12, hjust = 0.5),
+    panel.grid.major.x = element_line(color = "#ECF0F1", linewidth = 0.3, linetype = "dashed"),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    panel.background = element_rect(fill = "#FAFAFA", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+    legend.position = "none"
+  )
+
+```
+
+**Conclusión**
+
+**Analizando y contemplando todos los datos analizados podemos llegar a la conclución la cual es interesante ya que hay un fenomeno inverso al que planteé en el problema y en la hipotesis, porque de acuerdo a la comparación entre los 2 graficos de puntos se puede observar que Morelia es el municipio con mayor escolaridad y es tambien el que mas emigración tiene, con esto puedo confirmar lo que propuse en el histograma donde planteé que las personas emigran buscan mejores oportunidades para que sus hijos estudien y logren mayor escolaridad y mejor calidad de vida y no se dediquen al campo, entonces si se podría confirmar que el 20% de los emigrantes buscan estos beneficios y se produce el fenomeno conocido como fuga de cerebros ya que los que estudian mas tienden a salir de su estado para seguir estudiando ya que saben que en Michoacán de Ocampo no existirán oportunidades para ellos si siguen estudiando y esto lo pude comprobar entre el diagrama de dispersión de la escolaridad y la distribución normal de la PEA ocupada ya que se puede observar que aunque no se tengan un alto grado de escolaridad las personas tienen una gran posibilidad de encontrar trabajo aunque puede ser de manera informal, por lo tanto para ir concluir se tiene que la variable de PEA y Escolaridad no tienen mucha correlación entre sí aunque la de escolaridad y emigración si pero de manera inversa a mayor escolaridad mayor emigración. Sin embargo me causa algo de duda la parte de la inseguridad y violencia ya que en esa variable se tiene que un muy bajo porcentaje de personas emigran por este tema, esta duda surge porque se sabe que es un estado donde el narcotrafico esta muy presente, lo cual puede hacer que las personas al preguntarles sobre esto digan que no por su seguridad.**
